@@ -10,8 +10,8 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update        # auto-creates/updates tables on startup
-    show-sql: true            # logs every SQL query
+      ddl-auto: update
+    show-sql: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -20,16 +20,21 @@ spring:
   kafka:
     bootstrap-servers: localhost:9092
     producer:
-      # Serialize keys and values as JSON
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
-        # Includes Java type info in message headers so consumer knows how to deserialize
         spring.json.add.type.headers: true
+    consumer:
+      group-id: job-processor
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
 
 kafka:
   topics:
-    job-events: job-events    # the Kafka topic name we publish to
+    job-events: job-events
 
 server:
   port: 8080
@@ -38,3 +43,4 @@ logging:
   level:
     com.smartqueue: DEBUG
     org.springframework.web: INFO
+    org.springframework.kafka: INFO
