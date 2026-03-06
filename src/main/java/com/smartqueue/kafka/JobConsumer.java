@@ -29,7 +29,9 @@ public class JobConsumer {
         log.info("Received job event: jobId={}, eventType={}, status={}",
                 event.getJobId(), event.getEventType(), event.getStatus());
 
-        if (!"JOB_CREATED".equals(event.getEventType())) {
+        // Process JOB_CREATED (normal flow) and JOB_REPLAYED (admin replay from DLQ)
+        if (!"JOB_CREATED".equals(event.getEventType()) &&
+            !"JOB_REPLAYED".equals(event.getEventType())) {
             log.info("Skipping event type: {}", event.getEventType());
             return;
         }

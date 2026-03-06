@@ -36,10 +36,12 @@ spring:
     redis:
       host: localhost
       port: 6379
-      
+      # No password for local dev — add one in production
+
 kafka:
   topics:
     job-events: job-events
+    job-dlq: job-dlq
 
 redis:
   idempotency:

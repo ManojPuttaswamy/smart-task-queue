@@ -12,16 +12,8 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Maps to the job_instance table in PostgreSQL.
- *
- * Key concepts used here:
- * - @Entity        → tells JPA this class is a database table
- * - @Id            → marks the primary key
- * - @GeneratedValue → auto-generates the UUID
- * - @Version       → optimistic locking (prevents race conditions)
- * - @Enumerated    → stores enum as a string in DB (not a number)
- * - Lombok @Data   → auto-generates getters, setters, equals, hashCode
- * - Lombok @Builder → lets us do: JobInstance.builder().title("x").build()
+ * Day 5 change: added retryCount column to track how many
+ * times a job has been retried before succeeding or failing.
  */
 @Entity
 @Table(name = "job_instance")
@@ -50,6 +42,15 @@ public class JobInstance {
     @Builder.Default
     private JobStatus status = JobStatus.PENDING;
 
+    /**
+     * Tracks how many retry attempts have been made.
+     * Starts at 0, increments on each failure.
+     * When it hits MAX_RETRIES (3), job is marked FAILED.
+     */
+    @Column(name = "retry_count", nullable = false)
+    @Builder.Default
+    private int retryCount = 0;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -58,12 +59,6 @@ public class JobInstance {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    /**
-     * @Version enables optimistic locking.
-     * If two threads try to update the same job simultaneously,
-     * the second one will get an OptimisticLockException instead of
-     * silently overwriting data.
-     */
     @Version
     @Column(name = "version")
     private Long version;

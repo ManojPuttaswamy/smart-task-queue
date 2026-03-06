@@ -2,6 +2,8 @@ package com.smartqueue.service;
 
 import com.smartqueue.entity.JobInstance;
 import com.smartqueue.entity.JobStatus;
+import com.smartqueue.kafka.DlqEvent;
+import com.smartqueue.kafka.DlqProducer;
 import com.smartqueue.kafka.JobEvent;
 import com.smartqueue.repository.JobRepository;
 import com.smartqueue.statemachine.JobStateMachine;
@@ -10,14 +12,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.Random;
+
 /**
- * Handles job processing with full Redis-based idempotency.
- *
- * Flow:
- * 1. Check Redis — if key exists, this is a duplicate → skip
- * 2. Process the job (PENDING → PROCESSING → COMPLETED)
- * 3. Store idempotency key in Redis with 24hr TTL
- * 4. If processing fails → clear Redis key so retry is allowed
+ * Day 6 changes:
+ * - Injected DlqProducer
+ * - When max retries exhausted → build DlqEvent and publish to job-dlq topic
  */
 @Service
 @Slf4j
@@ -27,63 +28,125 @@ public class JobProcessingService {
     private final JobRepository jobRepository;
     private final JobStateMachine jobStateMachine;
     private final IdempotencyService idempotencyService;
+    private final RetryService retryService;
+    private final DlqProducer dlqProducer;
+
+    private final Random random = new Random();
 
     @Transactional
     public void processJob(JobEvent event) {
 
-        // Step 1: Redis idempotency check — BEFORE touching the DB
-        // This replaces the DB status check we used in Day 3
+        // Redis idempotency check — skip duplicates immediately
         if (idempotencyService.isAlreadyProcessed(event.getJobId(), event.getEventType())) {
             log.info("Skipping duplicate event: jobId={}, eventType={}",
                     event.getJobId(), event.getEventType());
             return;
         }
 
-        // Step 2: Fetch job from DB
+        // Fetch fresh from DB
         JobInstance job = jobRepository.findById(event.getJobId())
                 .orElseThrow(() -> new RuntimeException("Job not found: " + event.getJobId()));
 
-        log.info("Processing job: jobId={}, currentStatus={}", job.getJobId(), job.getStatus());
+        log.info("Processing job: jobId={}, currentStatus={}, retryCount={}",
+                job.getJobId(), job.getStatus(), job.getRetryCount());
 
-        // Safety net — if Redis key was cleared but job already completed
+        // Safety net for non-PENDING jobs
         if (job.getStatus() != JobStatus.PENDING) {
             log.warn("Job not in PENDING state, skipping: jobId={}, status={}",
                     job.getJobId(), job.getStatus());
-            // Re-mark as processed so we don't keep retrying
             idempotencyService.markAsProcessed(event.getJobId(), event.getEventType());
             return;
         }
 
         try {
-            // Step 3: PENDING → PROCESSING
+            // PENDING → PROCESSING
             job.setStatus(jobStateMachine.transition(job.getStatus(), JobStatus.PROCESSING));
             jobRepository.save(job);
             log.info("Job status updated to PROCESSING: jobId={}", job.getJobId());
 
-            // Step 4: Simulate actual work
-            log.info("Simulating work for jobId={}...", job.getJobId());
+            // Simulate actual work
             Thread.sleep(500);
 
-            // Step 5: PROCESSING → COMPLETED
+            // Simulate 30% random failure — mimics real-world errors
+            // (DB timeout, network error, third-party API failure, etc.)
+            simulateRandomFailure();
+
+            // PROCESSING → COMPLETED
             job.setStatus(jobStateMachine.transition(job.getStatus(), JobStatus.COMPLETED));
             jobRepository.save(job);
-            log.info("Job completed successfully: jobId={}", job.getJobId());
+            log.info("Job completed successfully: jobId={}, totalRetries={}",
+                    job.getJobId(), job.getRetryCount());
 
-            // Step 6: Mark as processed in Redis AFTER successful completion
-            // This is intentionally LAST — if we crash before this line,
-            // Kafka will retry and we'll process again (acceptable — better than losing the job)
+            // Mark as processed in Redis — only on SUCCESS
+            // If we marked it before processing and then crashed, the job would be lost
             idempotencyService.markAsProcessed(event.getJobId(), event.getEventType());
+
+        } catch (SimulatedProcessingException e) {
+            // Reset status back to PENDING so RetryService can handle it
+            job.setStatus(JobStatus.PENDING);
+            jobRepository.save(job);
+
+            // RetryService decides: retry with backoff OR mark as FAILED
+            boolean willRetry = retryService.handleFailure(job, e);
+
+            if (willRetry) {
+                // Clear idempotency key so the retry attempt is not blocked
+                idempotencyService.clearProcessed(event.getJobId(), event.getEventType());
+                // Re-process immediately after backoff delay
+                // In Day 6 we'll send to DLQ instead for cleaner separation
+                processJob(event);
+            } else {
+                // ── MAX RETRIES EXHAUSTED → PUBLISH TO DLQ ──────────────
+                log.error("Max retries exhausted, publishing to DLQ: jobId={}", job.getJobId());
+
+                DlqEvent dlqEvent = DlqEvent.builder()
+                        .jobId(job.getJobId())
+                        .tenantId(job.getTenantId())
+                        .title(job.getTitle())
+                        .description(job.getDescription())
+                        .failureReason(e.getMessage())
+                        .retryCount(job.getRetryCount())
+                        .failedAt(LocalDateTime.now())
+                        .originalEventType(event.getEventType())
+                        .build();
+
+                dlqProducer.publishToDlq(dlqEvent);
+
+                // Mark idempotency so this event is never re-processed
+                idempotencyService.markAsProcessed(event.getJobId(), event.getEventType());
+
+                log.error("Job permanently failed after {} retries: jobId={}",
+                        RetryService.MAX_RETRIES, job.getJobId());
+            }
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Job processing interrupted: jobId={}", job.getJobId());
-            // Don't mark as processed — allow retry
-        } catch (IllegalStateException e) {
-            log.error("Invalid state transition for jobId={}: {}", job.getJobId(), e.getMessage());
-            // Don't mark as processed — allow retry
-        } catch (Exception e) {
-            log.error("Unexpected error processing jobId={}: {}", job.getJobId(), e.getMessage());
-            // Don't mark as processed — allow retry
+        }
+    }
+
+    /**
+     * Simulates a 30% chance of failure.
+     * Replace this with real processing logic in production.
+     *
+     * Real examples of what this represents:
+     * - External API returning 500
+     * - Database connection timeout
+     * - Out of memory during file processing
+     */
+    private void simulateRandomFailure() {
+        if (random.nextDouble() < 0.30) { //change it to 1.0 to simulate process 100% failure
+            throw new SimulatedProcessingException("Simulated processing failure (30% chance)");
+        }
+    }
+
+    /**
+     * Custom exception to distinguish simulated failures from
+     * real infrastructure errors like InterruptedException.
+     */
+    static class SimulatedProcessingException extends RuntimeException {
+        public SimulatedProcessingException(String message) {
+            super(message);
         }
     }
 }
