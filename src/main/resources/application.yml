@@ -17,6 +17,20 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
 
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      # Serialize keys and values as JSON
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        # Includes Java type info in message headers so consumer knows how to deserialize
+        spring.json.add.type.headers: true
+
+kafka:
+  topics:
+    job-events: job-events    # the Kafka topic name we publish to
+
 server:
   port: 8080
 
