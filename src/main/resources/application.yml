@@ -32,9 +32,18 @@ spring:
       properties:
         spring.json.trusted.packages: "*"
 
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      
 kafka:
   topics:
     job-events: job-events
+
+redis:
+  idempotency:
+    ttl-hours: 24   # how long to keep processed event keys in Redis
 
 server:
   port: 8080
