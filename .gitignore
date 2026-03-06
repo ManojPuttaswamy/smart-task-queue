@@ -1,0 +1,22 @@
+# Maven
+target/
+*.class
+*.jar
+
+# IDE / Editor tooling
+.idea/
+.vscode/
+.bloop/
+.metals/
+*.iml
+
+# Spring Boot
+application-local.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

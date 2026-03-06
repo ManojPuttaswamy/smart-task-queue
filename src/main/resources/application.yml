@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: smart-task-queue
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/smartqueue
+    username: smartqueue_user
+    password: smartqueue_pass
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update        # auto-creates/updates tables on startup
+    show-sql: true            # logs every SQL query
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.smartqueue: DEBUG
+    org.springframework.web: INFO
