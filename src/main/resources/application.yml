@@ -12,11 +12,10 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
+    open-in-view: false     
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
-
   kafka:
     bootstrap-servers: localhost:9092
     producer:
@@ -36,7 +35,6 @@ spring:
     redis:
       host: localhost
       port: 6379
-      # No password for local dev — add one in production
 
 kafka:
   topics:
@@ -45,7 +43,7 @@ kafka:
 
 redis:
   idempotency:
-    ttl-hours: 24   # how long to keep processed event keys in Redis
+    ttl-hours: 24
 
 server:
   port: 8080
