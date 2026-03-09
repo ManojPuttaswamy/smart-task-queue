@@ -3,6 +3,7 @@ package com.smartqueue.exception;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -16,20 +17,50 @@ import java.util.Map;
  * @RestControllerAdvice = @ControllerAdvice + @ResponseBody
  * Applies to ALL controllers automatically.
  *
- * Without this:
- *   {"timestamp":"...","status":500,"error":"Internal Server Error","path":"/jobs/..."}
+ * Exception handler priority — Spring picks the MOST SPECIFIC handler:
+ *   AccessDeniedException  → 403  (must be declared before RuntimeException
+ *                                  because AccessDeniedException extends RuntimeException)
+ *   IllegalArgumentException → 400
+ *   IllegalStateException    → 400
+ *   RuntimeException         → 404 / 401 / 500  (catch-all, most generic)
  *
- * With this:
- *   {"status":404,"error":"Not Found","message":"Job not found: abc-123","timestamp":"..."}
+ * Why AccessDeniedException ends up here and not in CustomAccessDeniedHandler:
+ *   CustomAccessDeniedHandler handles 403s thrown by Spring Security's filter chain
+ *   (i.e., before the request reaches a controller).
+ *   @PreAuthorize throws AccessDeniedException INSIDE the controller layer,
+ *   AFTER the request has passed the filter chain — so @ControllerAdvice catches it.
+ *   Both handlers are needed for complete coverage.
  */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
 
     /**
-     * Handles job-not-found and invalid login credentials (RuntimeException).
-     * Returns 404 for "not found" messages, 401 for "invalid" credentials,
-     * 500 for everything else.
+     * Handles @PreAuthorize failures — when an authenticated user's role
+     * doesn't permit the action (e.g., VIEWER trying to POST /jobs).
+     *
+     * IMPORTANT: must be declared BEFORE handleRuntimeException because
+     * AccessDeniedException extends RuntimeException. Spring picks the most
+     * specific handler, but only if it's registered — declaring it explicitly
+     * here guarantees it's always caught correctly.
+     *
+     * Returns 403 Forbidden.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessDeniedException(AccessDeniedException ex) {
+        log.warn("Access denied: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "status", HttpStatus.FORBIDDEN.value(),
+                "error", "Forbidden",
+                "message", "You don't have permission to perform this action.",
+                "timestamp", LocalDateTime.now().toString()
+        ));
+    }
+
+    /**
+     * Handles job-not-found and invalid login credentials.
+     * Returns 404 for "not found", 401 for bad credentials, 500 for everything else.
      */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, Object>> handleRuntimeException(RuntimeException ex) {

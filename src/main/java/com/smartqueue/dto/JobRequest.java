@@ -12,8 +12,6 @@ import lombok.Data;
  */
 @Data
 public class JobRequest {
-
-    private String tenantId;   // which tenant this job belongs to
     private String title;      // short title of the job
     private String description; // detailed description
 }

@@ -1,5 +1,6 @@
 package com.smartqueue.config;
 
+import com.smartqueue.security.CustomAccessDeniedHandler;
 import com.smartqueue.security.CustomAuthenticationEntryPoint;
 import com.smartqueue.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +44,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
+    private final CustomAccessDeniedHandler accessDeniedHandler;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -55,7 +57,10 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
             .exceptionHandling(ex ->
-                ex.authenticationEntryPoint(authenticationEntryPoint))
+                ex.authenticationEntryPoint(authenticationEntryPoint)
+                .accessDeniedHandler(accessDeniedHandler)
+            
+            )
 
             // URL-level access rules
             .authorizeHttpRequests(auth -> auth

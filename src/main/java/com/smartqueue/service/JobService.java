@@ -33,11 +33,11 @@ public class JobService {
      * Creates a new job, saves to PostgreSQL, then publishes to Kafka.
      */
     @Transactional
-    public JobInstance createJob(JobRequest request) {
-        log.info("Creating job: title='{}', tenant='{}'", request.getTitle(), request.getTenantId());
+    public JobInstance createJob(JobRequest request, String tenantId) {
+        log.info("Creating job: title='{}', tenant='{}'", request.getTitle(), tenantId);
 
         JobInstance job = JobInstance.builder()
-                .tenantId(request.getTenantId())
+                .tenantId(tenantId)
                 .title(request.getTitle())
                 .description(request.getDescription())
                 .build();
@@ -59,7 +59,6 @@ public class JobService {
         // Publish to Kafka — async, won't block the response
         jobProducer.publishJobEvent(event);
 
-        // Kafka publish happens here (JobProducer called from here in Day 2)
         return saved;
     }
 
@@ -67,8 +66,8 @@ public class JobService {
      * Retrieves a job by ID.
      */
     @Transactional(readOnly = true)
-    public JobInstance getJob(UUID jobId) {
-        return jobRepository.findById(jobId)
+    public JobInstance getJob(UUID jobId, String tenantId) {
+        return jobRepository.findByJobIdAndTenantId(jobId, tenantId)
                 .orElseThrow(() -> new RuntimeException("Job not found: " + jobId));
     }
 

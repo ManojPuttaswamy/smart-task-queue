@@ -1,9 +1,12 @@
 package com.smartqueue.controller;
 
+import com.smartqueue.security.AuthenticatedUser;
 import com.smartqueue.service.AdminService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -20,6 +23,7 @@ import java.util.UUID;
 @RequestMapping("/admin")
 @Slf4j
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminController {
 
     private final AdminService adminService;
@@ -37,8 +41,8 @@ public class AdminController {
      *   4. Re-publish a fresh JobEvent to job-events topic
      */
     @PostMapping("/jobs/{jobId}/replay")
-    public ResponseEntity<Map<String, String>> replayJob(@PathVariable UUID jobId) {
-        log.info("Replay requested for jobId={}", jobId);
+    public ResponseEntity<Map<String, String>> replayJob(@PathVariable UUID jobId, @AuthenticationPrincipal AuthenticatedUser user) {
+        log.info("Replay requested for jobId={} by admin: {} (tenant: {})",jobId, user.username(), user.tenantId());
         adminService.replayJob(jobId);
         return ResponseEntity.ok(Map.of(
                 "status", "replayed",
