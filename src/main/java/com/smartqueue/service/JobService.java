@@ -59,6 +59,7 @@ public class JobService {
         // Publish to Kafka — async, won't block the response
         jobProducer.publishJobEvent(event);
 
+        // Kafka publish happens here (JobProducer called from here in Day 2)
         return saved;
     }
 
