@@ -27,17 +27,22 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     /**
-     * Handles job-not-found and other RuntimeExceptions.
-     * Returns 404 for "not found" messages, 500 for everything else.
+     * Handles job-not-found and invalid login credentials (RuntimeException).
+     * Returns 404 for "not found" messages, 401 for "invalid" credentials,
+     * 500 for everything else.
      */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, Object>> handleRuntimeException(RuntimeException ex) {
         log.error("RuntimeException caught: {}", ex.getMessage());
 
-        boolean isNotFound = ex.getMessage() != null &&
-                ex.getMessage().toLowerCase().contains("not found");
-
-        HttpStatus status = isNotFound ? HttpStatus.NOT_FOUND : HttpStatus.INTERNAL_SERVER_ERROR;
+        HttpStatus status;
+        if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("not found")) {
+            status = HttpStatus.NOT_FOUND;
+        } else if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("invalid username or password")) {
+            status = HttpStatus.UNAUTHORIZED;
+        } else {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
 
         return ResponseEntity.status(status).body(Map.of(
                 "status", status.value(),
@@ -48,8 +53,24 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handles replay attempts on non-FAILED jobs.
-     * Returns 400 Bad Request with a clear message.
+     * Handles bad input such as duplicate username on registration.
+     * Returns 400 Bad Request.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgumentException(IllegalArgumentException ex) {
+        log.warn("IllegalArgumentException caught: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "status", HttpStatus.BAD_REQUEST.value(),
+                "error", "Bad Request",
+                "message", ex.getMessage(),
+                "timestamp", LocalDateTime.now().toString()
+        ));
+    }
+
+    /**
+     * Handles invalid state transitions (e.g., replay on a non-FAILED job).
+     * Returns 400 Bad Request.
      */
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalStateException(IllegalStateException ex) {

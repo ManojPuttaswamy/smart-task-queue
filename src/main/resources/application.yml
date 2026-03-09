@@ -12,10 +12,11 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
-    open-in-view: false     
+    open-in-view: false
     properties:
       hibernate:
         format_sql: true
+
   kafka:
     bootstrap-servers: localhost:9092
     producer:
@@ -44,6 +45,22 @@ kafka:
 redis:
   idempotency:
     ttl-hours: 24
+
+# ── JWT Configuration ────────────────────────────────────────────────────────
+#
+# jwt.secret:
+#   The key used to sign and verify all JWT tokens.
+#   Must be at least 32 characters (256 bits) for HMAC-SHA256.
+#   In production: load this from AWS Secrets Manager, HashiCorp Vault,
+#   or an environment variable — NEVER hardcode a real secret in source code.
+#
+# jwt.expiration-ms:
+#   How long a token stays valid. 86400000 ms = 24 hours.
+#   After expiry, the user must log in again to get a new token.
+#
+jwt:
+  secret: smartqueue-super-secret-key-change-in-production-min-32-chars
+  expiration-ms: 86400000
 
 server:
   port: 8080
