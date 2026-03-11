@@ -5,6 +5,7 @@ import com.smartqueue.entity.JobInstance;
 import com.smartqueue.kafka.JobEvent;
 import com.smartqueue.kafka.JobProducer;
 import com.smartqueue.repository.JobRepository;
+import com.smartqueue.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -14,26 +15,23 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Service layer contains all business logic.
- *
- * Day 2 change: after saving the job to DB, we now publish a Kafka event.
- * This is the "transactional outbox" pattern in simple form —
- * save first, then publish. Day 6 will make this more reliable.
- */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class JobService {
 
     private final JobRepository jobRepository;
-    private final JobProducer jobProducer;      // injected by Spring
+    private final JobProducer jobProducer;
+    private final AuditService auditService;
 
     /**
-     * Creates a new job, saves to PostgreSQL, then publishes to Kafka.
+     * Creates a new job, saves to PostgreSQL, publishes to Kafka,
+     * and writes an audit log entry.
+     *
+     * Audit log is written @Async — it doesn't block the HTTP response.
      */
     @Transactional
-    public JobInstance createJob(JobRequest request, String tenantId) {
+    public JobInstance createJob(JobRequest request, String tenantId, AuthenticatedUser user) {
         log.info("Creating job: title='{}', tenant='{}'", request.getTitle(), tenantId);
 
         JobInstance job = JobInstance.builder()
@@ -58,6 +56,16 @@ public class JobService {
 
         // Publish to Kafka — async, won't block the response
         jobProducer.publishJobEvent(event);
+
+        // Audit log — async, doesn't block response
+        auditService.logUserAction(
+                user,
+                "JOB_CREATED",
+                saved.getJobId().toString(),
+                null,                           // no old state — this is a creation
+                saved.getStatus().name(),
+                "Job created: " + saved.getTitle()
+        );
 
         return saved;
     }
