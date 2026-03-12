@@ -24,6 +24,7 @@ public class JobService {
     private final JobProducer jobProducer;
     private final AuditService auditService;
     private final AsyncClassificationService asyncClassificationService;
+    private final MetricsService metricsService;
 
     /**
      * Day 13: classification is now fully async.
@@ -86,6 +87,9 @@ public class JobService {
                 saved.getStatus().name(),
                 "Job created: " + saved.getTitle() + " | classification pending (async)"
         );
+
+        // track creation metric
+        metricsService.incrementJobsCreated();
 
         return saved;
     }

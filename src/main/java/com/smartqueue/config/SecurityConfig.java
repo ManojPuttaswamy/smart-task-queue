@@ -67,6 +67,12 @@ public class SecurityConfig {
                 // Public endpoints — no token required
                 .requestMatchers("/auth/**").permitAll()
 
+                // Prometheus scraping — must be open, Prometheus has no JWT
+                .requestMatchers("/actuator/prometheus").permitAll()
+ 
+                // Health check — useful for Docker/K8s probes
+                .requestMatchers("/actuator/health").permitAll()
+
                 // Everything else requires authentication
                 .anyRequest().authenticated()
             )

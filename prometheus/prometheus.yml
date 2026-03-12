@@ -1,0 +1,25 @@
+# Prometheus configuration file
+#
+# Prometheus works by "scraping" — it polls your app's /actuator/prometheus
+# endpoint on a schedule and stores the metrics in its time-series database.
+#
+# scrape_interval: how often Prometheus polls each target (15s is standard)
+# evaluation_interval: how often it evaluates alert rules
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # ── Spring Boot App ────────────────────────────────────────────────────────
+  # 'job' is the name shown in Prometheus UI and Grafana
+  # static_configs.targets: the host:port of the Spring Boot app
+  # NOTE: 'host.docker.internal' works on Mac/Windows Docker Desktop
+  #       On Linux, use the actual host IP or Docker network alias
+  - job_name: 'smart-task-queue'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          application: 'smart-task-queue'
+          environment: 'local'

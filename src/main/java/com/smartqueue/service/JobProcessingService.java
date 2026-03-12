@@ -26,6 +26,7 @@ public class JobProcessingService {
     private final RetryService retryService;
     private final DlqProducer dlqProducer;
     private final AuditService auditService;  
+    private final MetricsService metricService;
 
     private final Random random = new Random();
 
@@ -51,11 +52,17 @@ public class JobProcessingService {
             return;
         }
 
+        //record when we started (for latency)
+        long startTimeMs = System.currentTimeMillis();
+
         try {
             // PENDING → PROCESSING
             JobStatus oldStatus = job.getStatus();
             job.setStatus(jobStateMachine.transition(job.getStatus(), JobStatus.PROCESSING));
             jobRepository.save(job);
+
+            // add to active jobs metrics
+            metricService.recordJobStarted();
 
             // Audit: system moved job to PROCESSING
             auditService.logSystemAction(
@@ -87,6 +94,10 @@ public class JobProcessingService {
 
             idempotencyService.markAsProcessed(event.getJobId(), event.getEventType());
 
+            //increment jobCompleted counter and record latency.
+            metricService.incrementJobsCreated();
+            metricService.recordJobProcessingTime(System.currentTimeMillis() - startTimeMs);
+
             log.info("Job completed successfully: jobId={}", job.getJobId());
 
         } catch (SimulatedProcessingException e) {
@@ -97,6 +108,9 @@ public class JobProcessingService {
 
             if (willRetry) {
                 idempotencyService.clearProcessed(event.getJobId(), event.getEventType());
+
+                //count each retried jobs
+                metricService.incrementJobsRetried();
 
                 // Audit: retry attempt
                 auditService.logSystemAction(
@@ -136,6 +150,11 @@ public class JobProcessingService {
                         JobStatus.FAILED.name(),
                         "Max retries (" + RetryService.MAX_RETRIES + ") exhausted: " + e.getMessage()
                 );
+
+                //add metrics of failure, DLQ counter and latency
+                metricService.incrementJobsFailed();
+                metricService.incrementJobsSentToDlq();
+                metricService.recordJobProcessingTime(System.currentTimeMillis() - startTimeMs);
 
                 log.error("Job permanently failed after {} retries: jobId={}",
                         RetryService.MAX_RETRIES, job.getJobId());

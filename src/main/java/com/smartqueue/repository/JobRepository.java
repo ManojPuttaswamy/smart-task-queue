@@ -28,4 +28,6 @@ public interface JobRepository extends JpaRepository<JobInstance, UUID> {
     List<JobInstance> findByStatus(JobStatus status);
 
     Optional<JobInstance> findByJobIdAndTenantId(UUID jobId, String tenantId);
+
+    long countByStatus(JobStatus processing);
 }

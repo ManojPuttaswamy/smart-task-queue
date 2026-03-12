@@ -82,8 +82,26 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-    restart: unless-stopped    
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: smartqueue-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      # Mount our scrape config into the container
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      # Persist Prometheus data across restarts
+      - prometheus_data:/prometheus
+    command:
+      # Tell Prometheus where its config file is (we mounted it above)
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      # How long to keep data (15 days is good for local dev)
+      - '--storage.tsdb.retention.time=15d'
+    restart: unless-stopped      
 
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:

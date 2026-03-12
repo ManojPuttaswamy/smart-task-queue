@@ -41,6 +41,7 @@ import java.time.Duration;
 public class ClassificationCacheService {
 
     private final ClassifierClient classifierClient;
+    private final MetricsService metricsService;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
 
@@ -59,6 +60,7 @@ public class ClassificationCacheService {
             String cached = redisTemplate.opsForValue().get(cacheKey);
             if (cached != null) {
                 log.info("Classification cache HIT: title='{}', key={}", title, cacheKey);
+                metricsService.incrementCacheHits();
                 ClassificationResponse response = objectMapper.readValue(cached, ClassificationResponse.class);
                 // Mark it clearly as coming from cache
                 response.setSource(response.getSource() + "_CACHED");
@@ -71,6 +73,7 @@ public class ClassificationCacheService {
 
         // Step 2: Cache MISS — call the Python classifier
         log.info("Classification cache MISS: title='{}'. Calling AI service.", title);
+        metricsService.incrementCacheMisses();
         ClassificationResponse response = classifierClient.classify(title, description);
 
         // Step 3: Store result in Redis (only if classifier succeeded)

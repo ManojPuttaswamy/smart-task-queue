@@ -94,6 +94,29 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!--
+            Spring Boot Actuator — exposes management endpoints over HTTP.
+            /actuator/health  → liveness/readiness probe (used by K8s)
+            /actuator/prometheus → metrics endpoint Prometheus scrapes
+            Without this, there's no HTTP endpoint to expose metrics.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!--
+            Micrometer Prometheus Registry — translates Micrometer metrics
+            into Prometheus text format (the /actuator/prometheus response).
+            Micrometer is to metrics what SLF4J is to logging:
+            a vendor-neutral facade. Swap this one jar to switch to
+            Datadog, CloudWatch, Graphite, etc. — zero code changes.
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- Spring Boot Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

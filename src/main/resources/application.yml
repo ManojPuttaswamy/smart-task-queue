@@ -74,3 +74,26 @@ logging:
 classifier:
   url: http://localhost:8000
   timeout-ms: 3000
+
+# ── Spring Actuator + Prometheus Metrics ─────────────────────────────────────
+#
+# management.endpoints.web.exposure.include:
+#   By default Actuator only exposes /actuator/health over HTTP.
+#   We explicitly expose:
+#     - prometheus  → Prometheus scrapes this every 15s for metrics
+#     - health      → K8s liveness/readiness probes use this
+#     - info        → Shows app version and build info
+#
+# management.metrics.tags.application:
+#   Attaches an 'application' label to EVERY metric automatically.
+#   This lets you filter in Prometheus: {application="smart-task-queue"}
+#   Critical when multiple services send metrics to the same Prometheus.
+#
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    tags:
+      application: smart-task-queue

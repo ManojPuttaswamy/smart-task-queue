@@ -27,6 +27,7 @@ public class AdminService {
     private final IdempotencyService idempotencyService;
     private final AuditService auditService;
     private final AuditLogRepository auditLogRepository;
+    private final MetricsService metricsService;
 
     @Transactional
     public void replayJob(UUID jobId, AuthenticatedUser admin) {
@@ -70,6 +71,9 @@ public class AdminService {
                 JobStatus.PENDING.name(),
                 "Admin replay triggered by: " + admin.username()
         );
+
+        //trach metrics jobReplayed
+        metricsService.incrementJobsReplayed();
 
         log.info("Job replayed: jobId={}, triggeredBy={}", jobId, admin.username());
     }
