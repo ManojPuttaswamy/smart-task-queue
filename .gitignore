@@ -20,3 +20,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+#ai-classifier
+ai-classifier/.env
+ai-classifier/__pycache__/
+ai-classifier/*.pyc

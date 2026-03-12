@@ -67,6 +67,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  ai-classifier:
+    build:
+      context: ./ai-classifier
+      dockerfile: Dockerfile
+    container_name: smartqueue-ai-classifier
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped    
 
 volumes:
   postgres_data:
