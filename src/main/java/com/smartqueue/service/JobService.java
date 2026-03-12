@@ -1,7 +1,5 @@
 package com.smartqueue.service;
 
-import com.smartqueue.client.ClassifierClient;
-import com.smartqueue.dto.ClassificationResponse;
 import com.smartqueue.dto.JobRequest;
 import com.smartqueue.entity.JobInstance;
 import com.smartqueue.kafka.JobEvent;
@@ -25,33 +23,29 @@ public class JobService {
     private final JobRepository jobRepository;
     private final JobProducer jobProducer;
     private final AuditService auditService;
-    private final ClassifierClient classifierClient;
+    private final AsyncClassificationService asyncClassificationService;
 
     /**
-     * Creates a job, saves to DB, calls AI classifier, then publishes to Kafka.
+     * Day 13: classification is now fully async.
      *
-     * Flow:
-     *   1. Save job to DB (status=PENDING, no classification yet)
-     *   2. Call Python classifier — synchronous, max 3s timeout
-     *   3. If classifier responds → update job with category/priority
-     *   4. If classifier fails → job saved without classification (null fields)
-     *   5. Publish Kafka event
-     *   6. Write audit log
+     * Old flow (Day 12 — synchronous):
+     *   HTTP thread: save → classify (waits 1-2s) → publish Kafka → return
+     *   User waits: ~2 seconds
      *
-     * Why call classifier AFTER saving?
-     *   The job must exist in DB before we do anything else.
-     *   If the classifier call fails, we still have the job saved —
-     *   we don't lose the submission. Classification is best-effort.
+     * New flow (Day 13 — async):
+     *   HTTP thread: save → fire async task → publish Kafka → return
+     *   Background thread: classify → update DB
+     *   User waits: ~50ms (just the DB save)
      *
-     * Why call classifier BEFORE Kafka publish?
-     *   So the Kafka event (and anything that consumes it) already
-     *   has the classification metadata on the job in DB.
+     * Tradeoff: the response won't have classification fields yet.
+     * They'll be populated within ~2s. Client can poll GET /jobs/{id}
+     * to see the final classified result.
      */
     @Transactional
     public JobInstance createJob(JobRequest request, String tenantId, AuthenticatedUser user) {
         log.info("Creating job: title='{}', tenant='{}'", request.getTitle(), tenantId);
 
-        // Step 1: Save job to DB — no classification yet
+        // Step 1: Save job to DB
         JobInstance job = JobInstance.builder()
                 .tenantId(tenantId)
                 .title(request.getTitle())
@@ -61,30 +55,16 @@ public class JobService {
         JobInstance saved = jobRepository.save(job);
         log.info("Job saved to DB: jobId={}, status={}", saved.getJobId(), saved.getStatus());
 
-        // Step 2 & 3: Call AI classifier and store result
-        ClassificationResponse classification = classifierClient.classify(
+        // Step 2: Fire async classification — returns immediately, runs in background
+        // Classification fields will be null in the response but populated ~2s later
+        asyncClassificationService.classifyAndUpdate(
+                saved.getJobId(),
                 saved.getTitle(),
-                saved.getDescription()
+                saved.getDescription(),
+                saved.getTenantId()
         );
 
-        if (classification != null) {
-            saved.setCategory(classification.getCategory());
-            saved.setPriority(classification.getPriority());
-            saved.setConfidenceScore(classification.getConfidence());
-            saved.setClassificationSource(classification.getSource());
-            jobRepository.save(saved);
-
-            log.info("Job classified: jobId={}, category={}, priority={}, source={}",
-                    saved.getJobId(),
-                    saved.getCategory(),
-                    saved.getPriority(),
-                    saved.getClassificationSource());
-        } else {
-            // Classifier was down or timed out — job still created, just unclassified
-            log.warn("Job created without classification (classifier unavailable): jobId={}", saved.getJobId());
-        }
-
-        // Step 4: Publish Kafka event
+        // Step 3: Publish Kafka event (classification not ready yet — that's fine)
         JobEvent event = JobEvent.builder()
                 .jobId(saved.getJobId())
                 .tenantId(saved.getTenantId())
@@ -97,15 +77,14 @@ public class JobService {
 
         jobProducer.publishJobEvent(event);
 
-        // Step 5: Audit log
+        // Step 4: Audit log
         auditService.logUserAction(
                 user,
                 "JOB_CREATED",
                 saved.getJobId().toString(),
                 null,
                 saved.getStatus().name(),
-                "Job created: " + saved.getTitle() +
-                        (classification != null ? " | classified as: " + saved.getCategory() + "/" + saved.getPriority() : " | unclassified")
+                "Job created: " + saved.getTitle() + " | classification pending (async)"
         );
 
         return saved;

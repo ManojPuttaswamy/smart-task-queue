@@ -6,9 +6,12 @@ import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
  * @EnableAsync activates Spring's async task execution.
- * Required for @Async to work in AuditService.
- * Without this annotation, @Async methods run synchronously
- * and no warning is shown — easy bug to miss.
+ * Without this, @Async annotations are silently ignored —
+ * methods run synchronously on the calling thread.
+ *
+ * Spring creates a default thread pool (SimpleAsyncTaskExecutor)
+ * for @Async tasks. For production, define a custom ThreadPoolTaskExecutor
+ * bean to control pool size and queue capacity.
  */
 @SpringBootApplication
 @EnableAsync
