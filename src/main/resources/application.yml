@@ -70,3 +70,6 @@ logging:
     com.smartqueue: DEBUG
     org.springframework.web: INFO
     org.springframework.kafka: INFO
+
+classifier:
+  url: http://localhost:8000

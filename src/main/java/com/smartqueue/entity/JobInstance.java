@@ -12,8 +12,13 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Day 5 change: added retryCount column to track how many
- * times a job has been retried before succeeding or failing.
+ * These are populated asynchronously after job creation
+ * by calling the Python AI classifier service.
+ *
+ * nullable=true on all classification fields because:
+ * - Classification happens AFTER the job is saved
+ * - If the classifier is down, the job still gets created
+ * - The fields are filled in a second DB update
  */
 @Entity
 @Table(name = "job_instance")
@@ -42,14 +47,38 @@ public class JobInstance {
     @Builder.Default
     private JobStatus status = JobStatus.PENDING;
 
-    /**
-     * Tracks how many retry attempts have been made.
-     * Starts at 0, increments on each failure.
-     * When it hits MAX_RETRIES (3), job is marked FAILED.
-     */
     @Column(name = "retry_count", nullable = false)
     @Builder.Default
     private int retryCount = 0;
+
+    /**
+     * AI-assigned category: Infrastructure / Database / Application / Network
+     * Null until classifier runs. Stays null if classifier fails.
+     */
+    @Column(name = "category")
+    private String category;
+
+    /**
+     * AI-assigned priority: HIGH / MEDIUM / LOW
+     */
+    @Column(name = "priority")
+    private String priority;
+
+    /**
+     * How confident the AI was: 0.0 - 1.0
+     * Below 0.6 = fallback was used instead of AI
+     */
+    @Column(name = "confidence_score")
+    private Double confidenceScore;
+
+    /**
+     * "AI" if OpenAI classified it, "FALLBACK" if keyword rules were used.
+     * Tells you how reliable the classification is.
+     */
+    @Column(name = "classification_source")
+    private String classificationSource;
+
+    // ── Timestamps & versioning ───────────────────────────────────────────────
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
