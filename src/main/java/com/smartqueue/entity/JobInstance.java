@@ -78,6 +78,15 @@ public class JobInstance {
     @Column(name = "classification_source")
     private String classificationSource;
 
+    /**
+     * Correlation ID — a UUID generated at job creation time.
+     * Passed through every layer: HTTP → DB → Kafka → consumer → AI classifier.
+     * Every log line sets this in MDC so you can grep one ID to see a job's
+     * complete journey across all threads and services.
+     */
+    @Column(name = "correlation_id")
+    private String correlationId;
+
     // ── Timestamps & versioning ───────────────────────────────────────────────
 
     @CreationTimestamp

@@ -32,4 +32,11 @@ public class JobEvent {
     private JobStatus status;
     private String eventType;       // e.g. "JOB_CREATED" — useful for consumers to filter
     private LocalDateTime occurredAt;
+     
+    /**
+     * Correlation ID travels with the event through the entire pipeline.
+     * Consumer extracts it and puts it in MDC so all downstream logs
+     * are tagged with the same ID as the original HTTP request.
+     */
+    private String correlationId;
 }

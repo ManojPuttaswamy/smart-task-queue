@@ -20,7 +20,7 @@ Design decisions:
 import os
 import json
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -149,7 +149,7 @@ def keyword_fallback(title: str, description: str) -> ClassifyResponse:
 
 # ── Core classification logic ──────────────────────────────────────────────────
 
-def classify_with_ai(title: str, description: str) -> ClassifyResponse:
+def classify_with_ai(title: str, description: str, correlation_id: str = "unknown") -> ClassifyResponse:
     """
     Calls OpenAI and parses the response.
 
@@ -160,7 +160,7 @@ def classify_with_ai(title: str, description: str) -> ClassifyResponse:
     4. Validate all required fields are present
     5. Check confidence threshold — if < 0.6, use fallback instead
     """
-    log.info(f"Calling OpenAI for classification: title='{title}'")
+    log.info(f"Calling OpenAI for classification: title='{title}' [correlationId={correlation_id}]")
 
     user_prompt = USER_PROMPT_TEMPLATE.format(
         title=title,
@@ -225,34 +225,29 @@ def health():
 
 
 @app.post("/classify", response_model=ClassifyResponse)
-def classify(request: ClassifyRequest):
+def classify(request: ClassifyRequest, http_request: Request):
     """
     Main classification endpoint.
 
-    Flow:
-    1. Try AI classification
-    2. If AI fails for ANY reason (API down, bad JSON, rate limit) → fallback
-    3. If AI confidence < 0.6 → fallback (handled inside classify_with_ai)
-    4. Always return a valid ClassifyResponse — never 500 to the caller
-
-    Why catch all exceptions and use fallback?
-    The Java backend calls this synchronously during job creation.
-    If this service throws a 500, the job creation flow breaks.
-    Better to return a fallback classification than fail the whole request.
+    extract X-Correlation-ID header from the Java backend.
+    This ties Python service logs to the same correlationId used throughout
+    the Java app — one ID traces the job across both services.
     """
-    log.info(f"POST /classify: title='{request.title}'")
+    # Extract correlationId forwarded by ClassifierClient
+    correlation_id = http_request.headers.get("X-Correlation-ID", "unknown")
+    log.info(f"POST /classify: title='{request.title}' [correlationId={correlation_id}]")
 
     try:
-        result = classify_with_ai(request.title, request.description)
+        result = classify_with_ai(request.title, request.description, correlation_id)
         return result
     except json.JSONDecodeError as e:
-        log.error(f"AI returned invalid JSON: {e}. Using fallback.")
+        log.error(f"AI returned invalid JSON: {e}. Using fallback. [correlationId={correlation_id}]")
         return keyword_fallback(request.title, request.description)
     except ValueError as e:
-        log.error(f"AI response validation failed: {e}. Using fallback.")
+        log.error(f"AI response validation failed: {e}. Using fallback. [correlationId={correlation_id}]")
         return keyword_fallback(request.title, request.description)
     except Exception as e:
-        log.error(f"Unexpected error calling OpenAI: {e}. Using fallback.")
+        log.error(f"Unexpected error calling OpenAI: {e}. Using fallback. [correlationId={correlation_id}]")
         return keyword_fallback(request.title, request.description)
 
 

@@ -70,6 +70,11 @@ logging:
     com.smartqueue: DEBUG
     org.springframework.web: INFO
     org.springframework.kafka: INFO
+  pattern:
+    # %X{correlationId} reads from MDC — prints the value if set, blank if not
+    # This means every log line automatically includes the correlationId
+    # when it's been set, so you can grep for one ID to trace a full job journey
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} [correlationId=%X{correlationId}] - %msg%n"
 
 classifier:
   url: http://localhost:8000

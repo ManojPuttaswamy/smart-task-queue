@@ -8,6 +8,7 @@ import com.smartqueue.repository.JobRepository;
 import com.smartqueue.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,54 +45,69 @@ public class JobService {
      */
     @Transactional
     public JobInstance createJob(JobRequest request, String tenantId, AuthenticatedUser user) {
-        log.info("Creating job: title='{}', tenant='{}'", request.getTitle(), tenantId);
+        // Generate a unique correlationId for this job's entire lifecycle.
+        // Every log line from this point on will include correlationId=<uuid>
+        // so you can grep a single ID and trace the job across all threads/services.
+        String correlationId = UUID.randomUUID().toString();
+        MDC.put("correlationId", correlationId);
 
-        // Step 1: Save job to DB
-        JobInstance job = JobInstance.builder()
-                .tenantId(tenantId)
-                .title(request.getTitle())
-                .description(request.getDescription())
-                .build();
+        try {
+            log.info("Creating job: title='{}', tenant='{}'", request.getTitle(), tenantId);
 
-        JobInstance saved = jobRepository.save(job);
-        log.info("Job saved to DB: jobId={}, status={}", saved.getJobId(), saved.getStatus());
+            // Step 1: Save job to DB — include correlationId in the entity
+            JobInstance job = JobInstance.builder()
+                    .tenantId(tenantId)
+                    .title(request.getTitle())
+                    .description(request.getDescription())
+                    .correlationId(correlationId)
+                    .build();
 
-        // Step 2: Fire async classification — returns immediately, runs in background
-        // Classification fields will be null in the response but populated ~2s later
-        asyncClassificationService.classifyAndUpdate(
-                saved.getJobId(),
-                saved.getTitle(),
-                saved.getDescription(),
-                saved.getTenantId()
-        );
+            JobInstance saved = jobRepository.save(job);
+            log.info("Job saved to DB: jobId={}, status={}", saved.getJobId(), saved.getStatus());
 
-        // Step 3: Publish Kafka event (classification not ready yet — that's fine)
-        JobEvent event = JobEvent.builder()
-                .jobId(saved.getJobId())
-                .tenantId(saved.getTenantId())
-                .title(saved.getTitle())
-                .description(saved.getDescription())
-                .status(saved.getStatus())
-                .eventType("JOB_CREATED")
-                .occurredAt(LocalDateTime.now())
-                .build();
+            // Step 2: Fire async classification — pass correlationId so async thread
+            // can restore it in MDC and all classification logs share the same trace ID
+            asyncClassificationService.classifyAndUpdate(
+                    saved.getJobId(),
+                    saved.getTitle(),
+                    saved.getDescription(),
+                    saved.getTenantId(),
+                    correlationId
+            );
 
-        jobProducer.publishJobEvent(event);
+            // Step 3: Publish Kafka event — correlationId travels with the message
+            JobEvent event = JobEvent.builder()
+                    .jobId(saved.getJobId())
+                    .tenantId(saved.getTenantId())
+                    .title(saved.getTitle())
+                    .description(saved.getDescription())
+                    .status(saved.getStatus())
+                    .eventType("JOB_CREATED")
+                    .occurredAt(LocalDateTime.now())
+                    .correlationId(correlationId)
+                    .build();
 
-        // Step 4: Audit log
-        auditService.logUserAction(
-                user,
-                "JOB_CREATED",
-                saved.getJobId().toString(),
-                null,
-                saved.getStatus().name(),
-                "Job created: " + saved.getTitle() + " | classification pending (async)"
-        );
+            jobProducer.publishJobEvent(event);
 
-        // track creation metric
-        metricsService.incrementJobsCreated();
+            // Step 4: Audit log
+            auditService.logUserAction(
+                    user,
+                    "JOB_CREATED",
+                    saved.getJobId().toString(),
+                    null,
+                    saved.getStatus().name(),
+                    "Job created: " + saved.getTitle() + " | correlationId=" + correlationId
+            );
 
-        return saved;
+            metricsService.incrementJobsCreated();
+
+            return saved;
+
+        } finally {
+            // Always clear MDC after the request — thread pool reuses threads
+            // and stale MDC values would pollute future requests' logs
+            MDC.remove("correlationId");
+        }
     }
 
     @Transactional(readOnly = true)

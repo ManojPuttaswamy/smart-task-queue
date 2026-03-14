@@ -58,18 +58,30 @@ public class ClassifierClient {
 
     /**
      * Calls POST /classify on the Python service.
+     * Passes correlationId as X-Correlation-ID header so the Python service
+     * can log it and tie its logs to the Java logs for the same job.
      * Returns null on ANY failure — timeout, network error, bad response.
      * Caller must handle null gracefully.
      */
     public ClassificationResponse classify(String title, String description) {
+        // Get correlationId from MDC — it was set by the async classification thread
+        String correlationId = org.slf4j.MDC.get("correlationId");
+
         try {
             log.info("Calling AI classifier: title='{}'", title);
 
             long start = System.currentTimeMillis();
 
-            ClassificationResponse response = restClient.post()
+            var requestSpec = restClient.post()
                     .uri("/classify")
-                    .header("Content-Type", "application/json")
+                    .header("Content-Type", "application/json");
+
+            // Forward correlationId to Python service so its logs are traceable
+            if (correlationId != null) {
+                requestSpec = requestSpec.header("X-Correlation-ID", correlationId);
+            }
+
+            ClassificationResponse response = requestSpec
                     .body(Map.of(
                             "title", title,
                             "description", description != null ? description : ""))

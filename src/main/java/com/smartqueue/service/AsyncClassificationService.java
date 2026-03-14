@@ -55,10 +55,17 @@ public class AsyncClassificationService {
      */
     @Async
     @Transactional
-    public void classifyAndUpdate(UUID jobId, String title, String description, String tenantId) {
-        log.info("[ASYNC] Starting classification for jobId={}, title='{}'", jobId, title);
+    public void classifyAndUpdate(UUID jobId, String title, String description, String tenantId, String correlationId) {
+        // Restore correlationId in MDC for this async thread.
+        // Since @Async runs on a new thread, MDC is empty — we pass correlationId
+        // explicitly from JobService so all async logs share the same trace ID.
+        if (correlationId != null) {
+            org.slf4j.MDC.put("correlationId", correlationId);
+        }
 
         try {
+            log.info("[ASYNC] Starting classification for jobId={}, title='{}'", jobId, title);
+
             // Call classifier (with Redis cache)
             ClassificationResponse classification = classificationCacheService.classify(title, description);
 
@@ -90,6 +97,9 @@ public class AsyncClassificationService {
         } catch (Exception e) {
             // Never let async classification crash — it's best-effort enrichment
             log.error("[ASYNC] Classification failed for jobId={}: {}", jobId, e.getMessage());
+        } finally {
+            // Always clean up MDC — async thread pool reuses threads
+            org.slf4j.MDC.remove("correlationId");
         }
     }
 }
