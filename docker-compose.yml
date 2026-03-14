@@ -1,6 +1,19 @@
-version: '3.8'
+# Smart Task Queue — Docker Compose
+#
+# Start everything: docker-compose up -d
+# Stop everything:  docker-compose down
+# Wipe all data:    docker-compose down -v
+#
+# Service startup order (enforced by depends_on + healthchecks):
+#   zookeeper → kafka → kafka-ui
+#   postgres  ─┐
+#   kafka     ─┤→ app → prometheus → grafana
+#   redis     ─┘
+#   ai-classifier ─┘
 
 services:
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
     image: postgres:15
     container_name: smartqueue-postgres
@@ -17,19 +30,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
+  # ── Zookeeper ────────────────────────────────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: smartqueue-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD-SHELL", "cub zk-ready localhost:2181 30 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
+  # ── Kafka ────────────────────────────────────────────────────────────────────
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: smartqueue-kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
@@ -40,25 +65,36 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=WARN,kafka.producer.async.DefaultEventHandler=WARN,state.change.logger=WARN"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
+  # ── Kafka UI ─────────────────────────────────────────────────────────────────
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: smartqueue-kafka-ui
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "8090:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    restart: unless-stopped
 
+  # ── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2
     container_name: smartqueue-redis
     ports:
       - "6379:6379"
-    # redis-server --appendonly yes → enables AOF persistence
-    # so Redis doesn't lose data on restart
+    # AOF persistence — survives container restarts without losing idempotency keys
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -67,7 +103,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      
+      start_period: 5s
+    restart: unless-stopped
+
+  # ── AI Classifier (Python FastAPI) ───────────────────────────────────────────
   ai-classifier:
     build:
       context: ./ai-classifier
@@ -82,25 +121,62 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 10s
     restart: unless-stopped
 
+  # ── Spring Boot App ───────────────────────────────────────────────────────────
+  # Comment out this service if you want to run Spring Boot locally
+  # with: mvn spring-boot:run (faster for development — no Docker rebuild needed)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smartqueue-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-classifier:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      # Activates application-docker.yml — uses Docker hostnames instead of localhost
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/smartqueue
+      SPRING_DATASOURCE_USERNAME: smartqueue_user
+      SPRING_DATASOURCE_PASSWORD: smartqueue_pass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_DATA_REDIS_HOST: redis
+      CLASSIFIER_URL: http://ai-classifier:8000
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── Prometheus ───────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.48.0
     container_name: smartqueue-prometheus
+    depends_on:
+      - app
     ports:
       - "9090:9090"
     volumes:
-      # Mount our scrape config into the container
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      # Persist Prometheus data across restarts
       - prometheus_data:/prometheus
     command:
-      # Tell Prometheus where its config file is (we mounted it above)
       - '--config.file=/etc/prometheus/prometheus.yml'
-      # How long to keep data (15 days is good for local dev)
       - '--storage.tsdb.retention.time=15d'
     restart: unless-stopped
 
+  # ── Grafana ──────────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.2.0
     container_name: smartqueue-grafana
@@ -109,21 +185,15 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Default login: admin / admin (you'll be prompted to change on first login)
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
-      # Disable login screen for local dev (remove in production!)
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      # Allow Grafana to load dashboards from provisioning folder
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/smartqueue.json
     volumes:
-      # Auto-provision Prometheus as datasource
       - ./grafana/provisioning:/etc/grafana/provisioning
-      # Auto-load our dashboard JSON
       - ./grafana/dashboards:/var/lib/grafana/dashboards
-      # Persist Grafana data (saved dashboards, users, etc.)
       - grafana_data:/var/lib/grafana
-    restart: unless-stopped        
+    restart: unless-stopped
 
 volumes:
   postgres_data:

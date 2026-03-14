@@ -1,0 +1,30 @@
+# ── Docker profile configuration ─────────────────────────────────────────────
+#
+# This file is loaded ONLY when Spring Boot runs inside Docker
+# (when SPRING_PROFILES_ACTIVE=docker is set in docker-compose.yml).
+#
+# Why a separate profile?
+# When running locally: localhost:5432, localhost:9092, localhost:6379
+# When running in Docker: postgres:5432, kafka:9092, redis:6379
+#                         (Docker service names resolve via Docker's internal DNS)
+#
+# This profile OVERRIDES only the values that differ in Docker.
+# Everything else (JWT secret, logging, etc.) comes from application.yml.
+
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/smartqueue
+    username: smartqueue_user
+    password: smartqueue_pass
+
+  kafka:
+    bootstrap-servers: kafka:29092
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+classifier:
+  url: http://ai-classifier:8000
+  timeout-ms: 3000
