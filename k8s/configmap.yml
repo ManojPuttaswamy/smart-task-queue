@@ -1,0 +1,38 @@
+# ConfigMap stores non-sensitive configuration as key-value pairs.
+#
+# Why ConfigMap and not hardcode values in the Deployment?
+# - You can change config without rebuilding the Docker image
+# - Different environments (dev/staging/prod) can use different ConfigMaps
+# - Keeps configuration visible and auditable in version control
+#
+# Rule of thumb:
+#   Non-sensitive data (URLs, port numbers, feature flags) → ConfigMap
+#   Sensitive data (passwords, API keys, secrets) → Secret
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smartqueue-config
+  namespace: default
+  labels:
+    app: smartqueue
+data:
+  # Spring Boot profile — activates application-docker.yml
+  # which uses Kubernetes service names instead of localhost
+  SPRING_PROFILES_ACTIVE: "docker"
+
+  # Database connection — points to the postgres Service (not localhost)
+  # "postgres-service" is the name of the K8s Service we'll create for PostgreSQL
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres-service:5432/smartqueue"
+  SPRING_DATASOURCE_USERNAME: "smartqueue_user"
+
+  # Kafka — points to the kafka Service
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+
+  # Redis — points to the redis Service
+  SPRING_DATA_REDIS_HOST: "redis-service"
+  SPRING_DATA_REDIS_PORT: "6379"
+
+  # AI Classifier — points to the ai-classifier Service
+  CLASSIFIER_URL: "http://ai-classifier-service:8000"
+  CLASSIFIER_TIMEOUT_MS: "3000"

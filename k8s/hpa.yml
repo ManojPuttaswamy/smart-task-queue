@@ -1,0 +1,45 @@
+# HPA — Horizontal Pod Autoscaler
+#
+# Automatically scales the number of pod replicas based on metrics.
+# K8s watches CPU usage across all pods and adjusts replica count.
+#
+# How it works:
+#   1. Metrics Server collects CPU/memory usage from each pod
+#   2. HPA checks metrics every 15 seconds
+#   3. If avg CPU > 70% → scale UP (add pods, up to maxReplicas)
+#   4. If avg CPU < 70% → scale DOWN (remove pods, down to minReplicas)
+#   5. Scale-down has a 5-minute cooldown to prevent thrashing
+#
+# Example:
+#   2 pods, each at 90% CPU → HPA adds pods until avg drops below 70%
+#   2 pods, each at 10% CPU → HPA scales down to 1 pod after cooldown
+#
+# Why minReplicas: 2?
+#   Single replica = single point of failure.
+#   2 replicas means if one pod dies during an update, the other keeps serving.
+#
+# Prerequisites: Metrics Server must be installed in the cluster.
+#   minikube addons enable metrics-server
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: smartqueue-app-hpa
+  namespace: default
+spec:
+  # Which Deployment to scale
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: smartqueue-app
+
+  minReplicas: 2   # Never scale below 2 (high availability)
+  maxReplicas: 5   # Never scale above 5 (cost control)
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70  # Scale up when avg CPU > 70%
