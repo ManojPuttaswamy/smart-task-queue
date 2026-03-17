@@ -25,3 +25,6 @@ logs/
 ai-classifier/.env
 ai-classifier/__pycache__/
 ai-classifier/*.pyc
+
+#k8s
+k8s/secret.yml

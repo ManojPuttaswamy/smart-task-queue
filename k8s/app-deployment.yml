@@ -1,0 +1,132 @@
+# ── Deployment ────────────────────────────────────────────────────────────────
+#
+# A Deployment tells Kubernetes:
+#   - What container image to run
+#   - How many replicas (pods) to maintain
+#   - How to update pods (rolling update strategy)
+#   - What config/secrets to inject
+#
+# Key concepts:
+#   replicas: 2 → K8s always maintains 2 running pods. If one crashes, K8s
+#             automatically starts a new one. This is self-healing.
+#
+#   selector.matchLabels → tells the Deployment which pods it owns
+#   template.metadata.labels → the label applied to each pod
+#   These MUST match — that's how Deployment tracks its pods.
+#
+#   Rolling update strategy:
+#     maxSurge: 1 → can temporarily have 3 pods during update (2 + 1 new)
+#     maxUnavailable: 0 → never take a pod down before new one is ready
+#     This means zero-downtime deploys.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smartqueue-app
+  namespace: default
+  labels:
+    app: smartqueue-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: smartqueue-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Allow 1 extra pod during update
+      maxUnavailable: 0  # Never kill a pod before replacement is ready
+  template:
+    metadata:
+      labels:
+        app: smartqueue-app
+    spec:
+      containers:
+        - name: smartqueue-app
+          # In production: use a specific tag, never 'latest'
+          # latest makes rollbacks impossible and deployments unpredictable
+          image: smart-task-queue-app:latest
+          imagePullPolicy: Never  # Use local image built by Minikube
+          ports:
+            - containerPort: 8080
+
+          # Load ALL keys from ConfigMap as environment variables
+          envFrom:
+            - configMapRef:
+                name: smartqueue-config
+
+          # Load individual keys from Secret
+          env:
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: smartqueue-secret
+                  key: SPRING_DATASOURCE_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: smartqueue-secret
+                  key: JWT_SECRET
+
+          # Resource limits — critical in production
+          # requests: guaranteed minimum resources K8s reserves for this pod
+          # limits: hard maximum — pod is killed if it exceeds this
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"      # 250 millicores = 0.25 CPU
+            limits:
+              memory: "512Mi"
+              cpu: "500m"      # 500 millicores = 0.5 CPU
+
+          # Liveness probe: is the app still alive?
+          # K8s restarts the pod if this fails 3 times
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60  # Give Spring Boot time to start
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # Readiness probe: is the app ready to receive traffic?
+          # K8s removes the pod from the Service load balancer if this fails
+          # This prevents traffic from going to a pod that's starting up
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 3
+
+---
+# ── Service ───────────────────────────────────────────────────────────────────
+#
+# A Service gives pods a stable network address.
+# Pods are ephemeral — they get new IPs when restarted.
+# A Service always has the same IP/DNS name, and load-balances across pods.
+#
+# Service types:
+#   ClusterIP   → only reachable inside the cluster (default)
+#   NodePort    → exposes on a port on every Node (good for local dev)
+#   LoadBalancer → creates a cloud load balancer (AWS ALB, GCP LB, etc.)
+#
+# We use NodePort here so we can access the app from our Mac via Minikube.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartqueue-app-service
+  namespace: default
+  labels:
+    app: smartqueue-app
+spec:
+  type: NodePort
+  selector:
+    app: smartqueue-app  # Routes traffic to pods with this label
+  ports:
+    - protocol: TCP
+      port: 8080        # Port the Service listens on inside the cluster
+      targetPort: 8080  # Port on the pod to forward to
+      nodePort: 30080   # Port exposed on the Minikube node (access via minikube ip:30080)
